@@ -57,9 +57,18 @@ After posting inline findings, write `./.claude-review-verdict.json`:
   "event": "APPROVE",
   "summary": "One or two sentences the PR author reads first.",
   "important": 0,
-  "nits": 3
+  "nits": [
+    { "path": "src/video/worker.ts", "line": 142, "note": "claimedAtMs has no reader" }
+  ]
 }
 ```
+
+`nits` is structured rather than prose because a caller records it mechanically — a
+backlog step reads this array directly, so a nit described only in `summary` is a
+nit that gets lost. Give every entry a `path`; include `line` whenever you can point
+at one, and keep `note` to the single phrase a person needs to find the problem
+again weeks later. An empty array is meaningful: it says this change has no
+outstanding nits, and a caller may use it to clear ones recorded earlier.
 
 `event` follows from the findings, with no discretion:
 
@@ -76,6 +85,10 @@ stopping early, still write the file with `COMMENT`.
 
 ## Nit backlog
 
-For each nit, include a line in `summary` of the form `nit: <path>:<line> — <what>`.
-The sweep job collects these across PRs and fixes them in one pass, which keeps this
-job read-only and keeps mechanical cleanups out of the review history.
+Record every nit in the `nits` array rather than fixing it. The sweep job batches
+them across pull requests and fixes them in one pass, which is what keeps this job
+read-only and keeps mechanical churn out of the review history.
+
+Report the same nit the same way each time you see it. A re-review of a pull request
+replaces its recorded nits wholesale, so a nit you phrase differently on the second
+pass reads as a new one and the backlog grows noise instead of converging.

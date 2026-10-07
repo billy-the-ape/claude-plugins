@@ -19,8 +19,18 @@ clears them later as one pull request a human reads.
 `review` ends by writing `./.claude-review-verdict.json`:
 
 ```json
-{ "event": "APPROVE", "summary": "...", "important": 0, "nits": 3 }
+{
+  "event": "APPROVE",
+  "summary": "...",
+  "important": 0,
+  "nits": [{ "path": "src/video/worker.ts", "line": 142, "note": "claimedAtMs has no reader" }]
+}
 ```
+
+`nits` is structured so a caller can record it mechanically. In `ai-gateway` a
+workflow step appends it to a `nit-backlog` issue, one block per pull request, which
+gives the backlog a durable home and a history outside the repository — the reviewer
+itself holds no write access to either.
 
 `REQUEST_CHANGES` when there is an Important finding, `APPROVE` when there are only
 nits, `COMMENT` when the review could not be completed. The calling workflow submits
