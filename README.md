@@ -2,10 +2,31 @@
 
 A [Claude Code](https://code.claude.com/docs) plugin marketplace with two plugins:
 
-| Plugin | Skill | What it does |
-| --- | --- | --- |
-| `planner` | `/planner:plan` | Work out how to implement a change before writing any of it |
-| `reviewer` | `/reviewer:review` | Review a diff, branch, or pull request |
+| Plugin | Skill | What it does | Writes code? |
+| --- | --- | --- | --- |
+| `planner` | `/planner:plan` | Work out how to implement a change before writing any of it | No |
+| `reviewer` | `/reviewer:review` | Review a diff, branch, or pull request and decide if it is approvable | **No** |
+| `reviewer` | `/reviewer:sweep` | Clear accumulated review nits in one pull request | Yes, in its own PR |
+
+## The review/fix split
+
+`review` holds no `Edit`, no `git commit`, no `git push` and no merge tool — the
+grant in its frontmatter simply omits them. An agent that writes a fix, judges the
+fix sound, and clears the merge has no independent check in the loop, so the fixing
+lives somewhere else: `review` records nits in its verdict summary, and `sweep`
+clears them later as one pull request a human reads.
+
+`review` ends by writing `./.claude-review-verdict.json`:
+
+```json
+{ "event": "APPROVE", "summary": "...", "important": 0, "nits": 3 }
+```
+
+`REQUEST_CHANGES` when there is an Important finding, `APPROVE` when there are only
+nits, `COMMENT` when the review could not be completed. The calling workflow submits
+the GitHub review from that file, so the approval is a mechanical consequence of the
+verdict rather than a tool call the agent may or may not make — and the agent never
+holds approval power itself.
 
 The marketplace is named **`ape-plugins`**. That name comes from `name` in
 `.claude-plugin/marketplace.json`, not from this repository, and it is what people
