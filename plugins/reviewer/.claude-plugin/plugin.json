@@ -1,0 +1,8 @@
+{
+  "name": "reviewer",
+  "description": "Review a diff, branch, or pull request",
+  "author": {
+    "name": "billy-the-ape",
+    "url": "https://github.com/billy-the-ape"
+  }
+}

@@ -1,0 +1,27 @@
+name: Validate
+
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  validate:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install Claude Code
+        run: curl -fsSL https://claude.ai/install.sh | bash
+      # Validating the marketplace root checks marketplace.json and each
+      # relative-path plugin's manifest. Validating each plugin additionally
+      # checks the frontmatter of every skill it ships, which is where a typo
+      # that stops a skill loading actually shows up.
+      # Do not add --strict here. Both plugins deliberately omit `version` so
+      # that installs track commits instead of a pinned string, and validate
+      # reports that omission as a warning. --strict would fail the build on it.
+      - name: Validate marketplace and plugins
+        run: |
+          export PATH="$HOME/.local/bin:$PATH"
+          claude plugin validate .
+          claude plugin validate ./plugins/planner
+          claude plugin validate ./plugins/reviewer

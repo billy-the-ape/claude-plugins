@@ -1,0 +1,20 @@
+{
+  "name": "ape-plugins",
+  "description": "Planning and review workflows for Claude Code",
+  "owner": {
+    "name": "billy-the-ape",
+    "url": "https://github.com/billy-the-ape"
+  },
+  "plugins": [
+    {
+      "name": "planner",
+      "source": "./plugins/planner",
+      "description": "Plan a change before writing any of it"
+    },
+    {
+      "name": "reviewer",
+      "source": "./plugins/reviewer",
+      "description": "Review a diff, branch, or pull request"
+    }
+  ]
+}

@@ -1,0 +1,16 @@
+# macOS / Windows
+.DS_Store
+Thumbs.db
+
+# Editors
+*.swp
+.idea/
+
+# Per-user Claude Code state.
+# Do NOT widen this to `.claude*` — that pattern would also exclude the
+# .claude-plugin/ manifests this repo exists to ship.
+.claude/settings.local.json
+
+# Only if you add tooling; none is needed for a plugins repo
+node_modules/
+npm-debug.log*
