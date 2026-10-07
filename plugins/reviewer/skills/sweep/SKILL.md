@@ -7,10 +7,10 @@ allowed-tools: Read Grep Glob Edit Write Bash(git status *) Bash(git diff *) Bas
 # Sweep
 
 This is where the write access lives, deliberately kept out of `/reviewer:review`.
-Everything here lands as one pull request against a branch of its own — never a push
-to a protected branch, and never a push to someone else's PR branch. A human reads
-the result before it merges, which is what makes it safe for this job to edit code
-at all.
+Everything here lands on a branch of its own, for one pull request — never a push to
+a protected branch, and never a push to someone else's PR branch. A human reads the
+result before it merges, which is what makes it safe for this job to edit code at
+all.
 
 ## Pick up only what is safe to batch
 
@@ -34,7 +34,10 @@ week.
    two hundred unrelated lines.
 3. Run the repository's own fast checks before pushing — whatever a contributor runs
    locally. A sweep PR that turns CI red has cost more than it saved.
-4. Push the branch. Open one PR, listing what you fixed and what you left and why.
+4. Push the branch. The branch is the deliverable: a caller may open the pull
+   request itself, so do not assume you are the one opening it — check whether
+   you were told to, and if you were not, report what you fixed and what you
+   left so the caller can write it up.
 
 ## What to leave behind
 
