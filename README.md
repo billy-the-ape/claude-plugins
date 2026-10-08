@@ -8,10 +8,26 @@ A [Claude Code](https://code.claude.com/docs) plugin marketplace with two plugin
 | `reviewer` | `/reviewer:review` | Review a diff, branch, or pull request and decide if it is approvable | **No** |
 | `reviewer` | `/reviewer:sweep` | Clear accumulated review nits in one pull request | Yes, in its own PR |
 
+## Installing
+
+`reviewer:review` delegates the review itself to Anthropic's `code-review` skill, so
+install both marketplaces:
+
+```bash
+claude plugin marketplace add anthropics/claude-code
+claude plugin marketplace add billy-the-ape/claude-plugins
+claude plugin install code-review@claude-code-plugins
+claude plugin install reviewer@ape-plugins
+```
+
+In a workflow, `plugin_marketplaces` is newline-separated and takes both. Delegation
+needs `Skill` in the caller's `--allowedTools`, since `Skill` is a permissioned tool;
+without it the delegation cannot fire and the review silently does less.
+
 ## The review/fix split
 
-`review` holds no `Edit`, no `git commit`, no `git push` and no merge tool — the
-grant in its frontmatter simply omits them. An agent that writes a fix, judges the
+`review` holds no `Edit`, no `git commit`, no `git push`, no merge tool and no build
+or test command — the grant in its frontmatter simply omits them. An agent that writes a fix, judges the
 fix sound, and clears the merge has no independent check in the loop, so the fixing
 lives somewhere else: `review` records nits in its verdict summary, and `sweep`
 clears them later as one pull request a human reads.

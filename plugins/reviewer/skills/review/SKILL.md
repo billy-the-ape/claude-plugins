@@ -1,56 +1,47 @@
 ---
 name: review
 description: Review a diff, branch, or pull request for correctness bugs, regressions, and risky changes, post findings as inline comments, and decide whether the change is approvable. Use this whenever the user asks for a code review, asks you to look over a change before it merges, mentions reviewing a diff, a branch or a PR, or asks whether a change is safe to ship — even when they never use the word "review".
-allowed-tools: Read Grep Glob Bash(git diff *) Bash(git log *) Bash(git status *) Bash(git rev-parse *) Write(./.claude-review-verdict.json)
+allowed-tools: Skill Read Grep Glob Bash(git diff *) Bash(git log *) Bash(git status *) Bash(git rev-parse *) Write(./.claude-review-verdict.json)
 ---
 
 # Review
 
-This skill reviews and judges. It never changes code.
+This skill adds only what a caller needs around a review. The review itself is
+delegated, and the restrictions are enforced by the tool grant above rather than
+restated here: there is no `Edit`, no `git commit`, no `git push`, no merge tool
+and no build or test command, so none of those is available to talk yourself into.
 
-That separation is the point: when the same agent writes a fix, decides the fix is
-good, and clears the merge, there is no independent check anywhere in the loop. So
-the tool grant above has no `Edit`, no `git commit`, no `git push`, and no merge —
-not as a matter of policy you could talk yourself out of, but because the tools are
-absent. The one writable path is the verdict file, which the workflow turns into a
-real GitHub review. Nits you would otherwise fix in place go to the backlog instead;
-`/reviewer:sweep` clears them later in a PR a human can read.
+## Delegate the review itself
 
-## Establish the target first
+Run `/code-review:code-review --comment <target>` and let it do the review. Its
+prompt is maintained and evaluated upstream; a second copy of that reasoning kept
+here would drift from it and be the worse of the two within a month.
 
-The wrong base makes every finding suspect, so settle this before reading code:
+Everything below is what that skill cannot know about this setup.
 
-- An explicit target (`owner/repo/pull/N`, a branch, a path, a ref range) wins.
-- Otherwise review the current branch against the PR's base, which is not always the
-  default branch. `git rev-parse` the base before diffing against it.
-- If you cannot determine the base, say so and stop. Do not guess `main`.
+## CI has already run — read it, do not reproduce it
 
-## Severity, and what it costs to get wrong
+The caller tells you CI's conclusion and where its logs are. Treat that as the
+source of truth for whether the code builds and the tests pass. You have no build
+or test command, which is deliberate: re-running a suite CI just ran spends
+minutes and tokens to learn something already on the page.
 
-Rank every finding, because the author acts on the ranking:
+A red CI does not stop the review. Read the failure and say whether it looks
+caused by this change or independent of it — that is the most useful thing you can
+tell an author staring at a red check, and a failure unrelated to the diff is not
+a reason to withhold approval.
 
-- **Important** — would break behaviour, lose data, or leak something in production.
-  A finding earns this only when you can name the input or state that produces the
-  wrong result. "This looks fragile" is not an Important finding.
-- **Nit** — correct but worth improving. Never blocks.
-- **Pre-existing** — real, but this change did not introduce it. Label it so, or the
-  author wastes a round trip discovering it is not theirs.
+## Record nits, do not fix them
 
-Inflating a nit to Important costs the author a cycle and teaches them to distrust
-the next review. Burying a real bug among nits costs more. Spend the care here.
+Put every nit in the verdict's `nits` array instead of acting on it; a separate
+sweep batches them into one pull request later. Report the same nit the same way
+each time you see it, because a re-review replaces a pull request's recorded nits
+wholesale — a nit rephrased on a second pass reads as new, and the backlog
+accumulates duplicates instead of converging.
 
-## What not to report
+## Write the verdict last
 
-Noise is the failure mode that makes reviews get ignored:
-
-- Anything CI already enforces — formatting, lint, type errors.
-- Style preferences with no behavioural consequence.
-- Anything you could not verify in the code you actually read. If a claim rests on
-  what a function's name suggests rather than what its body does, drop it.
-
-## The verdict
-
-After posting inline findings, write `./.claude-review-verdict.json`:
+Finish by writing `./.claude-review-verdict.json`:
 
 ```json
 {
@@ -63,32 +54,10 @@ After posting inline findings, write `./.claude-review-verdict.json`:
 }
 ```
 
-`nits` is structured rather than prose because a caller records it mechanically — a
-backlog step reads this array directly, so a nit described only in `summary` is a
-nit that gets lost. Give every entry a `path`; include `line` whenever you can point
-at one, and keep `note` to the single phrase a person needs to find the problem
-again weeks later. An empty array is meaningful: it says this change has no
-outstanding nits, and a caller may use it to clear ones recorded earlier.
+- **`REQUEST_CHANGES`** — at least one finding you would block a merge on.
+- **`APPROVE`** — no blocking findings. Nits alone never block.
+- **`COMMENT`** — you could not complete the review. Say why in `summary`. Never
+  approve a change you did not finish reading.
 
-`event` follows from the findings, with no discretion:
-
-- **`REQUEST_CHANGES`** — one or more Important findings.
-- **`APPROVE`** — no Important findings. Nits alone never block; record them in the
-  backlog and approve.
-- **`COMMENT`** — you could not complete the review (base unresolvable, diff too
-  large to read honestly). Say why in `summary`. Never approve a change you did not
-  finish reading.
-
-Write the file exactly once, as the last thing you do. The workflow submits the
-review from it, so a missing file means no review was posted at all — if you are
-stopping early, still write the file with `COMMENT`.
-
-## Nit backlog
-
-Record every nit in the `nits` array rather than fixing it. The sweep job batches
-them across pull requests and fixes them in one pass, which is what keeps this job
-read-only and keeps mechanical churn out of the review history.
-
-Report the same nit the same way each time you see it. A re-review of a pull request
-replaces its recorded nits wholesale, so a nit you phrase differently on the second
-pass reads as a new one and the backlog grows noise instead of converging.
+The caller submits a real GitHub review from this file, so a missing file means no
+review was posted at all. If you are stopping early, still write it with `COMMENT`.
