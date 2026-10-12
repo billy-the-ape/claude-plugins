@@ -1,7 +1,7 @@
 ---
 name: review
 description: Review a diff, branch, or pull request for correctness bugs, regressions, and risky changes, post findings as inline comments, and decide whether the change is approvable. Use this whenever the user asks for a code review, asks you to look over a change before it merges, mentions reviewing a diff, a branch or a PR, or asks whether a change is safe to ship — even when they never use the word "review".
-allowed-tools: Skill Read Grep Glob Bash(git diff *) Bash(git log *) Bash(git status *) Bash(git rev-parse *) Write(./.claude-review-verdict.json)
+allowed-tools: Skill Agent Task Read Grep Glob Bash(git diff *) Bash(git log *) Bash(git status *) Bash(git rev-parse *) Write(./.claude-review-verdict.json)
 ---
 
 # Review
@@ -18,6 +18,21 @@ prompt is maintained and evaluated upstream; a second copy of that reasoning kep
 here would drift from it and be the worse of the two within a month.
 
 Everything below is what that skill cannot know about this setup.
+
+## Run its subagents
+
+That skill is a pipeline of subagents: parallel reviewers, then a validator per
+finding. Launch them as it describes rather than doing its steps yourself in one
+pass. A single pass loses the independent second look and the validation step,
+which is why a clean review could be followed by one that finds real issues.
+
+## Re-reviews are expected
+
+Its first step stops when Claude has already commented on the pull request. In
+this setup that condition does not apply: the workflow re-reviews on every push,
+and the earlier review from `github-actions[bot]` covers an older commit. Its
+other stop conditions still apply; if one stops the review, write the verdict
+with `COMMENT` and name the condition in `summary`.
 
 ## CI has already run — read it, do not reproduce it
 
