@@ -1,17 +1,50 @@
 name: Claude Code Review
 
-# Triggered by CI finishing rather than by the pull request itself, so the
-# review reads CI's result instead of reproducing it. This also sidesteps the
-# bootstrap problem the pull_request trigger had: a workflow_run job always runs
-# the default branch's copy of this file, so the action's byte-identical check
-# passes by construction and a change here is testable without being merged first.
+# Shared review job, called from a small workflow in each repository:
+#
+#   on:
+#     workflow_run:
+#       workflows: ["CI"]
+#       types: [completed]
+#     workflow_dispatch:
+#       inputs:
+#         pr_number:
+#           description: PR number to review
+#           required: true
+#   jobs:
+#     review:
+#       uses: billy-the-ape/claude-plugins/.github/workflows/claude-review.yml@main
+#       secrets: inherit
+#       with:
+#         pr_number: ${{ inputs.pr_number }}
+#       permissions:
+#         contents: read
+#         pull-requests: write
+#         issues: write
+#         actions: read
+#         id-token: write
+#         statuses: write
+#
+# The triggers live in the caller because a reusable workflow cannot listen for
+# workflow_run itself. Being triggered by CI finishing, rather than by the pull
+# request, means the review reads CI's result instead of reproducing it.
+#
+# A called workflow sees the caller's github context, so github.event_name,
+# github.repository and github.event.workflow_run below all describe the calling
+# repository's run. The caller's permissions block is a ceiling: a permission
+# missing there is missing here, whatever the job below asks for.
+# `environment: claude` resolves in the calling repository, so each repository
+# keeps its own CLAUDE_CODE_OAUTH_TOKEN.
 on:
   workflow_call:
-  workflow_dispatch:
     inputs:
+      # Only set when the caller was dispatched by hand. A called workflow's
+      # inputs context holds what the caller passes in `with`, not the caller's
+      # own workflow_dispatch inputs, so the caller forwards it explicitly.
       pr_number:
-        description: PR number to review
-        required: true
+        description: PR number to review (manual runs only)
+        required: false
+        type: string
 
 jobs:
   review:
@@ -36,6 +69,7 @@ jobs:
       issues: write # only for the nit-backlog issue; grants nothing over code
       actions: read # to read the upstream CI run and its logs
       id-token: write
+      statuses: write # the "Claude Code Review" row on the PR's check list
     steps:
       # workflow_run's payload does not carry the pull request reliably — the
       # pull_requests array is empty for fork runs and inconsistent otherwise — so
@@ -96,6 +130,22 @@ jobs:
             echo "ci_url=$CI_URL"
           } >> "$GITHUB_OUTPUT"
           echo "Reviewing PR #$PR at $HEAD_SHA (CI: $CI_CONCLUSION)"
+
+      # A workflow_run job's own check attaches to the default branch's commit, so
+      # it never appears on the pull request. A commit status on the PR head SHA
+      # does, which is why the review's progress is mirrored there. Do not make it
+      # a required check: skipped runs (closed, draft) post no status at all.
+      - name: Mark the review as running
+        if: steps.pr.outputs.skip != 'true'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          REPO: ${{ github.repository }}
+          HEAD_SHA: ${{ steps.pr.outputs.head_sha }}
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+        run: |
+          gh api "repos/$REPO/statuses/$HEAD_SHA" \
+            -f state=pending -f context="Claude Code Review" \
+            -f description="Review in progress" -f target_url="$RUN_URL"
 
       # workflow_run runs in the default branch's context, so the head ref has to
       # be explicit. Checking out head is safe here because the tool grant below
@@ -175,6 +225,12 @@ jobs:
           # Run 2 still had the Write denied with both Write forms present, so the
           # same two paths are also granted as Edit rules: Claude Code files its
           # file-write permissions under Edit. Still one file, nothing else writable.
+          #
+          # Agent (and Task, its older name) lets the delegated skill run its
+          # subagents: parallel reviewers, then a validator per finding. Without it
+          # the skill degrades to one solo pass (kanban run 38276833337 reported
+          # `subagent_stats.spawned: 0`). Subagents inherit this same tool grant.
+          # Check `spawned` in the job log after a change here.
           claude_args: >-
             --effort high --allowedTools "mcp__github_inline_comment__create_inline_comment,Skill,Agent,Task,Read,Grep,Glob,Bash(git diff *),Bash(git log *),Bash(git status *),Bash(git rev-parse *),Bash(gh pr view *),Bash(gh pr diff *),Bash(gh run view *),Write(./.claude-review-verdict.json),Write(/${{ github.workspace }}/.claude-review-verdict.json),Edit(./.claude-review-verdict.json),Edit(/${{ github.workspace }}/.claude-review-verdict.json)"
 
@@ -231,6 +287,29 @@ jobs:
             echo "$PAYLOAD" | jq -c 'del(.comments)' \
               | gh api "repos/$REPO/pulls/$PR/reviews" --input -
           fi
+
+      # Runs on failure and cancellation too, so a broken review shows as a red
+      # row on the PR instead of leaving the pending status stuck. head_sha is
+      # empty when the PR could not be resolved or the run was skipped, and then
+      # there is no pending status to replace.
+      - name: Report the review result
+        if: always() && steps.pr.outputs.skip == 'false' && steps.pr.outputs.head_sha != ''
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          REPO: ${{ github.repository }}
+          HEAD_SHA: ${{ steps.pr.outputs.head_sha }}
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+          JOB_STATUS: ${{ job.status }}
+          REVIEW_EVENT: ${{ steps.verdict.outputs.event }}
+        run: |
+          case "$JOB_STATUS" in
+            success)   STATE=success; DESC="Review posted: ${REVIEW_EVENT:-done}" ;;
+            cancelled) STATE=error;   DESC="Review cancelled" ;;
+            *)         STATE=failure; DESC="Review did not complete" ;;
+          esac
+          gh api "repos/$REPO/statuses/$HEAD_SHA" \
+            -f state="$STATE" -f context="Claude Code Review" \
+            -f description="$DESC" -f target_url="$RUN_URL"
 
       # The nits are already in the verdict, so there is no discovery pass. This
       # step is the only thing holding issue write, and it runs after the review
