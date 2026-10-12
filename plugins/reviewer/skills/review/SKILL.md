@@ -26,6 +26,17 @@ finding. Launch them as it describes rather than doing its steps yourself in one
 pass. A single pass loses the independent second look and the validation step,
 which is why a clean review could be followed by one that finds real issues.
 
+Launch every subagent in the foreground: pass `run_in_background: false` on
+each Agent call, and send a step's parallel agents in one message so they still
+run side by side. This review runs non-interactively in CI, so the run ends the
+moment you end your turn. Nothing wakes you when a background agent finishes,
+its findings are lost, and no verdict is written. Never end your turn while a
+subagent is still running, and never end it before the verdict file exists.
+
+Tell each subagent to run one plain command per Bash call. The tool grant
+approves single commands, not pipes, redirects, `;`, `&&` or shell variables,
+so a compound command is denied and wastes a turn.
+
 ## Re-reviews are expected
 
 Its first step stops when Claude has already commented on the pull request. In
