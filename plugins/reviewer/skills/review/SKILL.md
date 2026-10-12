@@ -39,10 +39,10 @@ so a compound command is denied and wastes a turn. Run git from the working
 directory, never with `git -C <path>`: the grant matches commands that start
 `git diff`, `git log` and so on, so a `-C` form is denied.
 
-Run the bug-finding reviewers on Sonnet (`model: "sonnet"`) where that skill
-asks for Opus. This is a cost choice for this setup: the Opus bug finders were
-most of a review's usage. Every other agent keeps the model that skill names,
-including the Opus validators.
+Run every agent that skill asks to run on Opus on Sonnet instead
+(`model: "sonnet"`): the bug-finding reviewers and the validators alike. This
+is a cost choice for this setup: Opus agents were most of a review's usage.
+Agents that skill already puts on Haiku or Sonnet keep their model.
 
 ## Re-reviews are expected
 
