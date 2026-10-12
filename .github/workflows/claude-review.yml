@@ -58,6 +58,11 @@ jobs:
        github.event.workflow_run.conclusion != 'cancelled' &&
        github.event.workflow_run.conclusion != 'skipped')
     runs-on: ubuntu-latest
+    # A full multi-agent review takes 3–6 minutes. The cap is a backstop so a
+    # stuck run (a hung subagent, or an API retry loop near a usage limit) fails
+    # fast as "Review did not complete" instead of holding a runner for the
+    # default 6 hours. The status step still runs on timeout.
+    timeout-minutes: 30
     # Scopes CLAUDE_CODE_OAUTH_TOKEN to this environment. Secrets stored on an
     # environment are invisible to a job that does not name it, so without this
     # line the token resolves to empty and the action fails on auth. Keep the
