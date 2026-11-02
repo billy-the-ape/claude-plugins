@@ -217,9 +217,11 @@ jobs:
           # default one. Skill is permissioned, so the delegation needs it named
           # here. git subcommands are listed individually because a bare
           # Bash(git *) also permits `git -c <key>=<program>`, which runs
-          # arbitrary programs. No write tool and no build or test command is
-          # granted: the verdict comes back as structured output, and the step
-          # after this one writes it to disk.
+          # arbitrary programs. No build or test command is granted, and no write
+          # tool: the verdict comes back as structured output, and the step after
+          # this one writes it to disk. (The reviewer skill's own frontmatter still
+          # pre-approves writing the verdict file for callers without a schema;
+          # that step overwrites it here.)
           #
           # The gh entries are read-only subcommands, and they are required: the
           # delegated code-review skill starts with `gh pr view`, and the prompt
@@ -243,7 +245,8 @@ jobs:
           #
           # --json-schema is the verdict's shape. When no verdict matching it comes
           # back, the action fails this step, so the run still reports "Review did
-          # not complete" instead of posting nothing under a green check.
+          # not complete" instead of posting nothing under a green check. The schema
+          # sits inside single quotes, so keep single quotes out of it.
           claude_args: >-
             --effort high
             --json-schema '{"type": "object",

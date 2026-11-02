@@ -25,6 +25,10 @@ for the verdict, follow its commenting rules anyway: one comment per unique
 issue, brief, and a suggestion block only when committing it fixes the issue
 entirely.
 
+When that skill says to stop — after its summary when `--comment` is absent, or
+at one of its stop conditions — that ends its steps, not this skill's. Carry on
+with the sections below and finish with the verdict.
+
 Everything below is what that skill cannot know about this setup.
 
 ## Run its subagents
@@ -77,7 +81,8 @@ a reason to withhold approval.
 That skill drops nits on purpose: its reviewers and validators are told not to
 flag style, quality concerns or pedantic nitpicks. A nit you note while
 orchestrating would skip every check the pipeline applies, so once its review
-has finished, give nits a pass of their own:
+has finished, give nits a pass of their own. Skip the pass when one of its stop
+conditions ended the review; that verdict is `COMMENT` and records no nits.
 
 1. Launch one nit-finding agent on Sonnet. Give it the target, the pull
    request's title and description, and the findings the review kept, so it

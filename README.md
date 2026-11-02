@@ -33,10 +33,10 @@ else: `review` records nits in its verdict, and `sweep` clears them later as one
 request a human reads.
 
 A skill's `allowed-tools` frontmatter only pre-approves tools; it does not take any
-away, so the caller enforces read-only. In CI that is `--allowedTools`, the
-whole grant when nobody can approve a prompt, plus `--disallowedTools` deny rules
-for every posting route. Deny rules win over any skill's grant, including the
-delegated code-review skill's own `gh pr comment`.
+away, and in a non-interactive run its grant adds to the caller's `--allowedTools`.
+So the caller enforces read-only with `--disallowedTools` deny rules for every
+posting route: deny rules win over any skill's grant, including the delegated
+code-review skill's own `gh pr comment`.
 
 The upstream review drops nits on purpose, so `review` finds them in a pass of
 its own: one Sonnet agent finds them and a second validates the list, before any
