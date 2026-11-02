@@ -26,13 +26,25 @@ without it the delegation cannot fire and the review silently does less.
 
 ## The review/fix split
 
-`review` holds no `Edit`, no `git commit`, no `git push`, no merge tool and no build
-or test command — the grant in its frontmatter simply omits them. An agent that writes a fix, judges the
-fix sound, and clears the merge has no independent check in the loop, so the fixing
-lives somewhere else: `review` records nits in its verdict summary, and `sweep`
-clears them later as one pull request a human reads.
+`review` is meant to hold no `Edit`, no `git commit`, no `git push`, no merge tool
+and no build or test command. An agent that writes a fix, judges the fix sound, and
+clears the merge has no independent check in the loop, so the fixing lives somewhere
+else: `review` records nits in its verdict, and `sweep` clears them later as one pull
+request a human reads.
 
-`review` ends by writing `./.claude-review-verdict.json`:
+A skill's `allowed-tools` frontmatter only pre-approves tools; it does not take any
+away, and in a non-interactive run its grant adds to the caller's `--allowedTools`.
+So the caller enforces read-only with `--disallowedTools` deny rules for every
+posting route: deny rules win over any skill's grant, including the delegated
+code-review skill's own `gh pr comment`.
+
+The upstream review drops nits on purpose, so `review` finds them in a pass of
+its own: one Sonnet agent finds them and a second validates the list, before any
+nit reaches the verdict.
+
+`review` ends with a verdict. Run with `--json-schema`, as the shared workflow does,
+it returns the verdict as structured output and the workflow writes the file itself;
+otherwise it writes `./.claude-review-verdict.json`. The fields are the same:
 
 ```json
 {
@@ -50,7 +62,7 @@ itself holds no write access to either.
 
 `REQUEST_CHANGES` when there is an Important finding, `APPROVE` when there are only
 nits, `COMMENT` when the review could not be completed. The calling workflow submits
-the GitHub review from that file, so the approval is a mechanical consequence of the
+the GitHub review from the verdict, so the approval is a mechanical consequence of the
 verdict rather than a tool call the agent may or may not make — and the agent never
 holds approval power itself.
 
