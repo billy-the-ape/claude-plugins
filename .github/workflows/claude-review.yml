@@ -51,6 +51,13 @@ name: Claude Code Review
 # `uses`), so the job below does, and a secret passed by name resolves from that
 # environment even when only the environment holds it. If a repository secret
 # has the same name, the environment's value wins.
+#
+# To let the review approve, the calling repository must allow it: Settings →
+# Actions → General → Workflow permissions → "Allow GitHub Actions to create
+# and approve pull requests". New organizations turn this off, and their
+# repositories inherit it, so for an organization repository enable it in the
+# organization's settings first. Without it, GitHub rejects an APPROVE review,
+# and the job posts that verdict as a COMMENT review instead.
 on:
   workflow_call:
     inputs:
@@ -329,8 +336,10 @@ jobs:
       # The review is submitted here, from the verdict, rather than by Claude. The
       # agent never holds approval power; the approval is a mechanical consequence
       # of the findings. github-actions[bot] is a different identity from the PR
-      # author, so it can approve pull requests you opened yourself.
+      # author, so it can approve pull requests you opened yourself, provided the
+      # repository lets GitHub Actions approve (see the header).
       - name: Submit the review
+        id: submit
         if: steps.pr.outputs.skip != 'true'
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
@@ -339,14 +348,19 @@ jobs:
           REVIEW_EVENT: ${{ steps.verdict.outputs.event }}
           REVIEW_BODY: ${{ steps.verdict.outputs.summary }}
           HEAD_SHA: ${{ steps.pr.outputs.head_sha }}
+          APPROVAL_NOTE: >-
+            This review would have approved, but this repository does not allow
+            GitHub Actions to approve pull requests, so it is posted as a comment.
+            To let it approve, enable "Allow GitHub Actions to create and approve
+            pull requests" under Settings → Actions → General → Workflow
+            permissions. For an organization repository, enable it in the
+            organization's settings first.
         run: |
           set -euo pipefail
           # Inline comments come from the verdict's "comments" array. The action's
           # own inline-comment tool is unavailable here: it is only registered for
           # pull_request-style events, and this job runs on workflow_run or
-          # workflow_dispatch. GitHub rejects the whole review (422) if any comment
-          # line is outside the diff, so fall back to the summary alone rather than
-          # losing the review.
+          # workflow_dispatch.
           PAYLOAD=$(jq -c --arg event "$REVIEW_EVENT" --arg body "$REVIEW_BODY" \
             --arg sha "$HEAD_SHA" '{
               event: $event, body: $body, commit_id: $sha,
@@ -354,11 +368,47 @@ jobs:
                 | select(.path and .line and .body)
                 | {path, line, side: "RIGHT", body}]
             }' .claude-review-verdict.json)
-          if ! echo "$PAYLOAD" | gh api "repos/$REPO/pulls/$PR/reviews" --input -; then
-            echo "::warning::Review with inline comments was rejected; posting the summary only."
-            echo "$PAYLOAD" | jq -c 'del(.comments)' \
-              | gh api "repos/$REPO/pulls/$PR/reviews" --input -
-          fi
+
+          # Prints GitHub's response whether or not the call succeeds, and keeps
+          # it in RESPONSE so the loop below can tell one rejection from another.
+          submit() {
+            local status=0
+            RESPONSE=$(gh api "repos/$REPO/pulls/$PR/reviews" --input - \
+                         <<< "$PAYLOAD" 2>&1) || status=$?
+            printf '%s\n' "$RESPONSE"
+            return "$status"
+          }
+
+          # GitHub rejects the whole review (422) for either of two causes, and
+          # reports one at a time, so each retry removes one and tries again:
+          # - "GitHub Actions is not permitted to approve pull requests": the
+          #   repository setting in the header is off. Post as COMMENT with a note
+          #   instead of losing the review.
+          # - any other rejection while there are inline comments: a comment line
+          #   is likely outside the diff. Post the summary alone.
+          # Each fix applies at most once, so this makes at most three attempts.
+          DOWNGRADED=false
+          until submit; do
+            if [ "$(jq -r '.event' <<< "$PAYLOAD")" = APPROVE ] &&
+               grep -q 'not permitted to approve pull requests' <<< "$RESPONSE"; then
+              echo "::warning::GitHub Actions may not approve pull requests in this repository; posting the APPROVE verdict as a COMMENT review."
+              PAYLOAD=$(jq -c --arg note "$APPROVAL_NOTE" \
+                '.event = "COMMENT" | .body = "> [!NOTE]\n> " + $note + "\n\n" + .body' \
+                <<< "$PAYLOAD")
+              DOWNGRADED=true
+            elif [ "$(jq '.comments | length' <<< "$PAYLOAD")" -gt 0 ]; then
+              echo "::warning::Review with inline comments was rejected; posting the summary only."
+              PAYLOAD=$(jq -c 'del(.comments)' <<< "$PAYLOAD")
+            else
+              echo "::error::GitHub rejected the review; its response is above."
+              exit 1
+            fi
+          done
+
+          {
+            echo "event=$(jq -r '.event' <<< "$PAYLOAD")"
+            echo "downgraded=$DOWNGRADED"
+          } >> "$GITHUB_OUTPUT"
 
       # Runs on failure and cancellation too, so a broken review shows as a red
       # row on the PR instead of leaving the pending status stuck. head_sha is
@@ -372,10 +422,17 @@ jobs:
           HEAD_SHA: ${{ steps.pr.outputs.head_sha }}
           RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
           JOB_STATUS: ${{ job.status }}
-          REVIEW_EVENT: ${{ steps.verdict.outputs.event }}
+          # What was posted, which differs from the verdict when an APPROVE had
+          # to go out as a COMMENT.
+          REVIEW_EVENT: ${{ steps.submit.outputs.event || steps.verdict.outputs.event }}
+          DOWNGRADED: ${{ steps.submit.outputs.downgraded }}
         run: |
+          POSTED="${REVIEW_EVENT:-done}"
+          if [ "$DOWNGRADED" = true ]; then
+            POSTED="$POSTED (Actions may not approve PRs here)"
+          fi
           case "$JOB_STATUS" in
-            success)   STATE=success; DESC="Review posted: ${REVIEW_EVENT:-done}" ;;
+            success)   STATE=success; DESC="Review posted: $POSTED" ;;
             cancelled) STATE=error;   DESC="Review cancelled" ;;
             *)         STATE=failure; DESC="Review did not complete" ;;
           esac
