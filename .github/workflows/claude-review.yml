@@ -15,7 +15,8 @@ name: Claude Code Review
 # jobs:
 #   review:
 #     uses: billy-the-ape/claude-plugins/.github/workflows/claude-review.yml@main
-#     secrets: inherit
+#     secrets:
+#       CLAUDE_CODE_OAUTH_TOKEN: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
 #     with:
 #       pr_number: ${{ inputs.pr_number }}
 #     permissions:
@@ -34,8 +35,22 @@ name: Claude Code Review
 # github.repository and github.event.workflow_run below all describe the calling
 # repository's run. The caller's permissions block is a ceiling: a permission
 # missing there is missing here, whatever the job below asks for.
-# `environment: claude` resolves in the calling repository, so each repository
-# keeps its own CLAUDE_CODE_OAUTH_TOKEN.
+#
+# The caller passes the token by name, not with `secrets: inherit`. GitHub only
+# honours `inherit` between repositories in the same organization or
+# enterprise, and a personal account is neither, so a caller owned by anyone
+# other than billy-the-ape (an organization repository included) passes nothing
+# through it. The token then resolves to empty with no error until the action
+# fails on auth. Passing it by name works from any owner, and hands this
+# workflow that one secret instead of every secret the calling repository
+# holds. Callers in this account that still use `secrets: inherit` keep working.
+#
+# Each calling repository keeps its own CLAUDE_CODE_OAUTH_TOKEN in an
+# environment named `claude`; no repository secret is needed. The caller's job
+# cannot name the environment itself (GitHub rejects `environment` alongside
+# `uses`), so the job below does, and a secret passed by name resolves from that
+# environment even when only the environment holds it. If a repository secret
+# has the same name, the environment's value wins.
 on:
   workflow_call:
     inputs:
@@ -46,6 +61,15 @@ on:
         description: PR number to review (manual runs only)
         required: false
         type: string
+    secrets:
+      # Declared so a caller can pass it by name: passing a secret the called
+      # workflow does not declare is a validation error. Not `required: true`,
+      # because that only checks that the caller names the secret, not that it
+      # has a value, so it would not catch an empty token. The "Check the token
+      # reached this job" step below does.
+      CLAUDE_CODE_OAUTH_TOKEN:
+        description: Claude Code OAuth token, stored in the calling repository's `claude` environment
+        required: false
 
 jobs:
   review:
@@ -65,7 +89,9 @@ jobs:
     timeout-minutes: 30
     # Scopes CLAUDE_CODE_OAUTH_TOKEN to this environment. Secrets stored on an
     # environment are invisible to a job that does not name it, so without this
-    # line the token resolves to empty and the action fails on auth. Keep the
+    # line the token resolves to empty and the action fails on auth. Naming the
+    # environment is not enough on its own: the caller still has to pass the
+    # secret, by name or with `secrets: inherit` (see the header). Keep the
     # environment free of required reviewers or wait timers: a protection rule
     # here would park every review run pending an approval.
     environment: claude
@@ -136,6 +162,21 @@ jobs:
             echo "ci_url=$CI_URL"
           } >> "$GITHUB_OUTPUT"
           echo "Reviewing PR #$PR at $HEAD_SHA (CI: $CI_CONCLUSION)"
+
+      # A secret the caller did not pass resolves to an empty string without any
+      # error, and the action then fails with a message that names no cause.
+      # Failing here says what is wrong. It runs after the pull request is
+      # resolved so that skipped runs stay green, and the status step at the end
+      # still marks the PR's review row as failed.
+      - name: Check the token reached this job
+        if: steps.pr.outputs.skip != 'true'
+        env:
+          TOKEN: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
+        run: |
+          if [ -z "$TOKEN" ]; then
+            echo "::error::CLAUDE_CODE_OAUTH_TOKEN is empty in this job. Store it in the calling repository's 'claude' environment, and pass it from the calling workflow by name under 'secrets:'. 'secrets: inherit' passes nothing when the calling repository has a different owner from billy-the-ape/claude-plugins."
+            exit 1
+          fi
 
       # A workflow_run job's own check attaches to the default branch's commit, so
       # it never appears on the pull request. A commit status on the PR head SHA
