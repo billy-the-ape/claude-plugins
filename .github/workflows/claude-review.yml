@@ -244,11 +244,21 @@ jobs:
             the CI result.
             Read unchanged but related files as needed, sparingly, when more
             context demands.
-            State in the summary exactly which files you read, flagging unedited but
-            related files as (related).
             Return the final verdict as your structured output; do not write
-            a verdict file. Besides the existing fields, include "comments":
-            an array of inline review
+            a verdict file. The workflow lays out the review body from the
+            verdict's fields, so keep each field to its own content: "summary"
+            is the verdict and its reason in one or two sentences of Markdown,
+            with no file list and no discussion of CI.
+            Besides the existing fields, include "ci": one or two sentences
+            on CI's result, saying it passed, or naming what failed and
+            whether this change caused it. Include "files_read": every file
+            in the pull request diff that you read, each {"path": "<file>"},
+            adding "note" only when you did not read it in full (for example
+            "skimmed: fixture and formatting changes"). Include
+            "related_files": every file the pull request does not change that
+            you read for context, each {"path": "<file>", "note": "<what you
+            checked there>"}; use an empty array when there are none.
+            Include "comments": an array of inline review
             comments, one per important finding, each
             {"path": "<file>", "line": <line number in the new version of the
             file, inside the PR diff>, "body": "<the finding and, if small, the
@@ -298,10 +308,15 @@ jobs:
           claude_args: >-
             --effort high
             --json-schema '{"type": "object",
-            "required": ["event", "summary", "important", "nits", "comments"],
+            "required": ["event", "summary", "ci", "files_read", "related_files", "important", "nits", "comments"],
             "properties": {
             "event": {"type": "string", "enum": ["APPROVE", "REQUEST_CHANGES", "COMMENT"]},
             "summary": {"type": "string"},
+            "ci": {"type": "string"},
+            "files_read": {"type": "array", "items": {"type": "object", "required": ["path"],
+            "properties": {"path": {"type": "string"}, "note": {"type": "string"}}}},
+            "related_files": {"type": "array", "items": {"type": "object", "required": ["path", "note"],
+            "properties": {"path": {"type": "string"}, "note": {"type": "string"}}}},
             "important": {"type": "integer", "minimum": 0},
             "nits": {"type": "array", "items": {"type": "object", "required": ["path", "note"],
             "properties": {"path": {"type": "string"}, "line": {"type": "integer"}, "note": {"type": "string"}}}},
@@ -327,11 +342,6 @@ jobs:
           printf '%s' "$VERDICT" | jq . > .claude-review-verdict.json
           cat .claude-review-verdict.json
           echo "event=$(jq -r '.event' .claude-review-verdict.json)" >> "$GITHUB_OUTPUT"
-          {
-            echo 'summary<<VERDICT_EOF'
-            jq -r '.summary' .claude-review-verdict.json
-            echo 'VERDICT_EOF'
-          } >> "$GITHUB_OUTPUT"
 
       # The review is submitted here, from the verdict, rather than by Claude. The
       # agent never holds approval power; the approval is a mechanical consequence
@@ -346,8 +356,9 @@ jobs:
           REPO: ${{ github.repository }}
           PR: ${{ steps.pr.outputs.number }}
           REVIEW_EVENT: ${{ steps.verdict.outputs.event }}
-          REVIEW_BODY: ${{ steps.verdict.outputs.summary }}
           HEAD_SHA: ${{ steps.pr.outputs.head_sha }}
+          SERVER: ${{ github.server_url }}
+          CI_URL: ${{ steps.pr.outputs.ci_url }}
           APPROVAL_NOTE: >-
             This review would have approved, but this repository does not allow
             GitHub Actions to approve pull requests, so it is posted as a comment.
@@ -357,17 +368,49 @@ jobs:
             organization's settings first.
         run: |
           set -euo pipefail
+          # The body is laid out here from the verdict's fields rather than written
+          # by the model as one block, so every review has the same shape: the
+          # summary, a CI line, then the files read as a collapsed list linked at
+          # the reviewed commit. Path segments are percent-encoded one at a time,
+          # because @uri on the whole path would encode its slashes too.
+          #
           # Inline comments come from the verdict's "comments" array. The action's
           # own inline-comment tool is unavailable here: it is only registered for
           # pull_request-style events, and this job runs on workflow_run or
           # workflow_dispatch.
-          PAYLOAD=$(jq -c --arg event "$REVIEW_EVENT" --arg body "$REVIEW_BODY" \
-            --arg sha "$HEAD_SHA" '{
-              event: $event, body: $body, commit_id: $sha,
-              comments: [(.comments // [])[]
-                | select(.path and .line and .body)
-                | {path, line, side: "RIGHT", body}]
-            }' .claude-review-verdict.json)
+          PAYLOAD=$(jq -c --arg event "$REVIEW_EVENT" --arg sha "$HEAD_SHA" \
+            --arg blob "$SERVER/$REPO/blob/$HEAD_SHA" --arg ci_url "$CI_URL" '
+            def link: "[`\(.)`](\($blob)/\(split("/") | map(@uri) | join("/")))";
+            def section($title):
+              if length == 0 then []
+              else ["**\($title)**", ""]
+                + map("- \(.path | link)"
+                      + (if (.note // "") != "" then " — \(.note)" else "" end))
+                + [""]
+              end;
+            (.files_read // []) as $read
+            | (.related_files // []) as $related
+            | {
+                event: $event, commit_id: $sha,
+                body: (
+                  [.summary]
+                  + (if (.ci // "") != "" then
+                       [(if $ci_url == "none" then "**CI:**"
+                         else "**[CI](\($ci_url)):**" end) + " " + .ci]
+                     else [] end)
+                  + (if ($read + $related | length) > 0 then
+                       [(["<details>",
+                          "<summary><b>Files read</b>: \($read | length) in the diff, \($related | length) related</summary>",
+                          ""]
+                         + ($read | section("In the diff"))
+                         + ($related | section("Related, unchanged"))
+                         + ["</details>"]) | join("\n")]
+                     else [] end)
+                  | join("\n\n")),
+                comments: [(.comments // [])[]
+                  | select(.path and .line and .body)
+                  | {path, line, side: "RIGHT", body}]
+              }' .claude-review-verdict.json)
 
           # Prints GitHub's response whether or not the call succeeds, and keeps
           # it in RESPONSE so the loop below can tell one rejection from another.
